@@ -35,16 +35,20 @@ def main():
     normals.ComputeCellNormalsOn()
     normals.Update()
 
-    pd = normals.GetOutput()
+    clean = vtk.vtkCleanPolyData()
+    clean.SetInputConnection(normals.GetOutputPort())
+    clean.Update()
+
+    pd = clean.GetOutput()
 
     print pd.GetCellData().GetNumberOfArrays()
     print pd.GetCellData().GetArray("Normals")
 
     mesh = cy_mesh.Mesh(pd)
 
-    cy_mesh.ca_smoothing(mesh, 0.7, 1.0, 0.2, 10)
+    cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
 
-    view(pd)
+    #  view(pd)
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,7 @@
 cimport numpy as np
 
 from libc.math cimport sin, cos, acos, exp, sqrt, fabs, M_PI
+from libc.stdlib cimport abs as cabs
 from cython.operator cimport dereference as deref, preincrement as inc
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
@@ -29,6 +30,8 @@ cdef class Mesh:
         normals = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("Normals"))
         normals.shape = -1, 3
 
+        print ">>>", normals.dtype
+
         self.vertices = vertices
         self.faces = faces
         self.normals = normals
@@ -36,9 +39,9 @@ cdef class Mesh:
         cdef int i
 
         for i in xrange(faces.shape[0]):
-            self.map_vface[self.faces[i, 0]].push_back(i)
             self.map_vface[self.faces[i, 1]].push_back(i)
             self.map_vface[self.faces[i, 2]].push_back(i)
+            self.map_vface[self.faces[i, 3]].push_back(i)
 
     cdef vector[face_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
@@ -47,25 +50,27 @@ cdef vector[face_t] find_staircase_artifacts(Mesh mesh, double[3] stack_orientat
     cdef int nv, nf, f_id, v_id
     cdef double of_z, of_y, of_x, min_z, max_z, min_y, max_y, min_x, max_x;
     cdef vector[face_t]* f_ids
-    cdef normal_t[:] normal
+    cdef normal_t* normal
 
     cdef vector[face_t] output
+    cdef int i
 
     nv = mesh.vertices.shape[0]
 
     for v_id in xrange(nv):
-        max_z = -1000
-        min_z = 1000
-        max_y = -1000
-        min_y = 1000
-        max_x = -1000
-        min_x = 1000
+        max_z = -10000
+        min_z = 10000
+        max_y = -10000
+        min_y = 10000
+        max_x = -10000
+        min_x = 10000
 
         f_ids = mesh.get_faces_by_vertex(v_id)
         nf = deref(f_ids).size()
 
-        for f_id in xrange(nf):
-            normal = mesh.normals[f_id]
+        for i in xrange(nf):
+            f_id = deref(f_ids)[i]
+            normal = &mesh.normals[f_id][0]
 
             of_z = 1 - fabs(normal[0]*stack_orientation[0] + normal[1]*stack_orientation[1] + normal[2]*stack_orientation[2]);
             of_y = 1 - fabs(normal[0]*0 + normal[1]*1 + normal[2]*0);
