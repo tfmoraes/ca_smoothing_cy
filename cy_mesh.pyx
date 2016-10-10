@@ -5,6 +5,8 @@ from libc.stdlib cimport abs as cabs
 from cython.operator cimport dereference as deref, preincrement as inc
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
+from libcpp cimport bool
+from libcpp.deque cimport deque as cdeque
 
 from cy_my_types cimport vertex_t, normal_t, face_t
 
@@ -45,6 +47,59 @@ cdef class Mesh:
 
     cdef vector[face_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
+
+    cdef vector[face_t]* get_near_vertices_to_v(self, face_t v_id, float dmax) nogil:
+        cdef vector[face_t]* idfaces
+        cdef vector[face_t]* near_vertices = new vector[face_t]()
+
+        cdef cdeque[face_t] to_visit
+        cdef unordered_map[face_t, bool] status_v
+        cdef unordered_map[face_t, bool] status_f
+
+        cdef vertex_t *vip
+        cdef vertex_t *vjp
+
+        cdef float distance
+        cdef int nf, nid, j
+        cdef face_t f_id, vj
+
+        vip = &self.vertices[v_id][0]
+        to_visit.push_back(v_id)
+        while(not to_visit.empty()):
+            v_id = to_visit.front()
+            to_visit.pop_front()
+
+            status_v[v_id] = True
+
+            idfaces = self.get_faces_by_vertex(v_id)
+            nf = idfaces.size()
+
+            for nid in xrange(nf):
+                f_id = deref(idfaces)[nid]
+                if status_f.find(f_id) == status_f.end():
+                    status_f[f_id] = True
+
+                    for j in xrange(3):
+                        vj = self.faces[f_id][j+1]
+                        if status_v.find(vj) == status_v.end():
+                            status_v[vj] = True
+                            vjp = &self.vertices[vj][0]
+                            distance = sqrt((vip[0] - vjp[0]) * (vip[0] - vjp[0]) \
+                                            + (vip[1] - vjp[1]) * (vip[1] - vjp[1]) \
+                                            + (vip[2] - vjp[2]) * (vip[2] - vjp[2]))
+                            if distance <= dmax:
+                                near_vertices.push_back(vj)
+                                to_visit.push_back(vj)
+
+
+        return near_vertices
+
+    cpdef get_near_vertices(self, face_t v_id, float dmax):
+        cdef vector[face_t] *vertices = self.get_near_vertices_to_v(v_id, dmax)
+        print "percorrendo", vertices.size(), v_id, dmax
+        cdef vector[face_t].iterator it = vertices.begin()
+        return deref(vertices)
+
 
 cdef vector[face_t] find_staircase_artifacts(Mesh mesh, double[3] stack_orientation, double T) nogil:
     cdef int nv, nf, f_id, v_id

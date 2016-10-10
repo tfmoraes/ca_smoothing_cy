@@ -46,7 +46,9 @@ def main():
 
     mesh = cy_mesh.Mesh(pd)
 
-    cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
+    print mesh.get_near_vertices(2, 1.5)
+
+    #  cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
 
     #  view(pd)
 
