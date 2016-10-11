@@ -1,3 +1,4 @@
+import sys
 cimport numpy as np
 
 from libc.math cimport sin, cos, acos, exp, sqrt, fabs, M_PI
@@ -8,6 +9,7 @@ from libcpp.set cimport set
 from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.deque cimport deque as cdeque
+from cython.parallel import prange
 
 from cy_my_types cimport vertex_t, normal_t, vertex_id_t
 
@@ -18,35 +20,66 @@ from vtk.util import numpy_support
 
 ctypedef float weight_t
 
+cdef struct s_point:
+    vertex_t x
+    vertex_t y
+    vertex_t z
+
+ctypedef s_point Point
+
 cdef class Mesh:
     cdef vertex_t[:, :] vertices
     cdef vertex_id_t[:, :] faces
     cdef normal_t[:, :] normals
 
+    cdef bool _initialized
+
     cdef unordered_map[int, vector[vertex_id_t]] map_vface
 
-    def __init__(self, pd):
-        _vertices = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
-        _vertices.shape = -1, 3
-
-        _faces = numpy_support.vtk_to_numpy(pd.GetPolys().GetData())
-        _faces.shape = -1, 4
-
-        _normals = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("Normals"))
-        _normals.shape = -1, 3
-
-        print ">>>", _normals.dtype
-
-        self.vertices = _vertices
-        self.faces = _faces
-        self.normals = _normals
-
+    def __cinit__(self, pd=None, other=None):
         cdef int i
+        if pd:
+            self._initialized = True
+            _vertices = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
+            _vertices.shape = -1, 3
 
-        for i in xrange(_faces.shape[0]):
-            self.map_vface[self.faces[i, 1]].push_back(i)
-            self.map_vface[self.faces[i, 2]].push_back(i)
-            self.map_vface[self.faces[i, 3]].push_back(i)
+            _faces = numpy_support.vtk_to_numpy(pd.GetPolys().GetData())
+            _faces.shape = -1, 4
+
+            _normals = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("Normals"))
+            _normals.shape = -1, 3
+
+            self.vertices = _vertices
+            self.faces = _faces
+            self.normals = _normals
+
+
+            for i in xrange(_faces.shape[0]):
+                self.map_vface[self.faces[i, 1]].push_back(i)
+                self.map_vface[self.faces[i, 2]].push_back(i)
+                self.map_vface[self.faces[i, 3]].push_back(i)
+
+        elif other:
+            _other = <Mesh>other
+            self._initialized = True
+            self.vertices = _other.vertices.copy()
+            self.faces = _other.faces.copy()
+            self.normals = _other.normals.copy()
+            self.map_vface = unordered_map[int, vector[vertex_id_t]](_other.map_vface)
+
+        else:
+            self._initialized = False
+
+
+    cdef void copy_to(self, Mesh other):
+        if self._initialized:
+            other.vertices[:] = self.vertices
+            other.faces[:] = self.faces
+            other.normals[:] = self.normals
+        else:
+            other.vertices = self.vertices.copy()
+            other.faces = self.faces.copy()
+            other.normals = self.normals.copy()
 
     cdef vector[vertex_id_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
@@ -142,8 +175,8 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
     return weights
 
 
-cdef vector[float] calc_d(Mesh mesh, vertex_id_t v_id) nogil:
-    cdef vector[float] D = vector[float](3)
+cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
+    cdef Point D
     cdef int nf, f_id, nid
     cdef float n=0
     cdef int i
@@ -161,11 +194,11 @@ cdef vector[float] calc_d(Mesh mesh, vertex_id_t v_id) nogil:
             vj_id = mesh.faces[f_id][i+1]
             if (vj_id != v_id):
                 vertices.insert(vj_id)
-    del idfaces
+    #  del idfaces
 
-    D[0] = 0.0
-    D[1] = 0.0
-    D[2] = 0.0
+    D.x = 0.0
+    D.y = 0.0
+    D.z = 0.0
 
     vi = &mesh.vertices[v_id][0]
 
@@ -173,16 +206,16 @@ cdef vector[float] calc_d(Mesh mesh, vertex_id_t v_id) nogil:
     while it != vertices.end():
         vj = &mesh.vertices[deref(it)][0]
 
-        D[0] = D[0] + (vi[0] - vj[0])
-        D[1] = D[1] + (vi[1] - vj[1])
-        D[2] = D[2] + (vi[2] - vj[2])
+        D.x = D.x + (vi[0] - vj[0])
+        D.y = D.y + (vi[1] - vj[1])
+        D.z = D.z + (vi[2] - vj[2])
         n += 1.0
 
         inc(it)
 
-    D[0] = D[0] / n
-    D[1] = D[1] / n
-    D[2] = D[2] / n
+    D.x = D.x / n
+    D.y = D.y / n
+    D.z = D.z / n
     return D
 
 cdef vector[vertex_id_t]* find_staircase_artifacts(Mesh mesh, double[3] stack_orientation, double T) nogil:
@@ -239,9 +272,39 @@ cdef vector[vertex_id_t]* find_staircase_artifacts(Mesh mesh, double[3] stack_or
                 break
     return output
 
+cdef Mesh taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, int steps):
+    cdef Mesh new_mesh = Mesh(other=mesh)
+    cdef vector[Point] D = vector[Point](mesh.vertices.shape[0])
+    cdef vertex_t* vi
+    cdef int s, i
+    for s in xrange(steps):
+        for i in prange(D.size(), nogil=True):
+            D[i] = calc_d(new_mesh, i)
+
+        for i in xrange(D.size()):
+            vi = &mesh.vertices[i][0]
+
+            vi[0] = vi[0] + deref(weights)[i]*l*D[i].x;
+            vi[1] = vi[1] + deref(weights)[i]*l*D[i].y;
+            vi[2] = vi[2] + deref(weights)[i]*l*D[i].z;
+
+        for i in prange(D.size(), nogil=True):
+            D[i] = calc_d(new_mesh, i)
+
+        for i in xrange(D.size()):
+            vi = &mesh.vertices[i][0]
+
+            vi[0] = vi[0] + deref(weights)[i]*l*D[i].x;
+            vi[1] = vi[1] + deref(weights)[i]*l*D[i].y;
+            vi[2] = vi[2] + deref(weights)[i]*l*D[i].z;
+
+    return new_mesh
+
 def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef double[3] stack_orientation = [0.0, 0.0, 1.0]
     cdef vector[vertex_id_t]* vertices_staircase =  find_staircase_artifacts(mesh, stack_orientation, T)
 
     cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
     print deref(weights)
+
+    print taubin_smooth(mesh, weights, 0.5, -0.53, n_iters).vertices
