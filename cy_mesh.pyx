@@ -8,60 +8,62 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.deque cimport deque as cdeque
 
-from cy_my_types cimport vertex_t, normal_t, face_t
+from cy_my_types cimport vertex_t, normal_t, vertex_id
 
 import numpy as np
 import vtk
 
 from vtk.util import numpy_support
 
+ctypedef float weight_t
+
 cdef class Mesh:
     cdef vertex_t[:, :] vertices
-    cdef face_t[:, :] faces
+    cdef vertex_id[:, :] faces
     cdef normal_t[:, :] normals
 
-    cdef unordered_map[int, vector[face_t]] map_vface
+    cdef unordered_map[int, vector[vertex_id]] map_vface
 
     def __init__(self, pd):
-        vertices = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
-        vertices.shape = -1, 3
+        _vertices = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
+        _vertices.shape = -1, 3
 
-        faces = numpy_support.vtk_to_numpy(pd.GetPolys().GetData())
-        faces.shape = -1, 4
+        _faces = numpy_support.vtk_to_numpy(pd.GetPolys().GetData())
+        _faces.shape = -1, 4
 
-        normals = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("Normals"))
-        normals.shape = -1, 3
+        _normals = numpy_support.vtk_to_numpy(pd.GetCellData().GetArray("Normals"))
+        _normals.shape = -1, 3
 
-        print ">>>", normals.dtype
+        print ">>>", _normals.dtype
 
-        self.vertices = vertices
-        self.faces = faces
-        self.normals = normals
+        self.vertices = _vertices
+        self.faces = _faces
+        self.normals = _normals
 
         cdef int i
 
-        for i in xrange(faces.shape[0]):
+        for i in xrange(_faces.shape[0]):
             self.map_vface[self.faces[i, 1]].push_back(i)
             self.map_vface[self.faces[i, 2]].push_back(i)
             self.map_vface[self.faces[i, 3]].push_back(i)
 
-    cdef vector[face_t]* get_faces_by_vertex(self, int v_id) nogil:
+    cdef vector[vertex_id]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
 
-    cdef vector[face_t]* get_near_vertices_to_v(self, face_t v_id, float dmax) nogil:
-        cdef vector[face_t]* idfaces
-        cdef vector[face_t]* near_vertices = new vector[face_t]()
+    cdef vector[vertex_id]* get_near_vertices_to_v(self, vertex_id v_id, float dmax) nogil:
+        cdef vector[vertex_id]* idfaces
+        cdef vector[vertex_id]* near_vertices = new vector[vertex_id]()
 
-        cdef cdeque[face_t] to_visit
-        cdef unordered_map[face_t, bool] status_v
-        cdef unordered_map[face_t, bool] status_f
+        cdef cdeque[vertex_id] to_visit
+        cdef unordered_map[vertex_id, bool] status_v
+        cdef unordered_map[vertex_id, bool] status_f
 
         cdef vertex_t *vip
         cdef vertex_t *vjp
 
         cdef float distance
         cdef int nf, nid, j
-        cdef face_t f_id, vj
+        cdef vertex_id f_id, vj
 
         vip = &self.vertices[v_id][0]
         to_visit.push_back(v_id)
@@ -94,20 +96,59 @@ cdef class Mesh:
 
         return near_vertices
 
-    cpdef get_near_vertices(self, face_t v_id, float dmax):
-        cdef vector[face_t] *vertices = self.get_near_vertices_to_v(v_id, dmax)
+    cpdef get_near_vertices(self, vertex_id v_id, float dmax):
+        cdef vector[vertex_id] *vertices = self.get_near_vertices_to_v(v_id, dmax)
         print "percorrendo", vertices.size(), v_id, dmax
-        cdef vector[face_t].iterator it = vertices.begin()
+        cdef vector[vertex_id].iterator it = vertices.begin()
         return deref(vertices)
 
+cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id]* vertices_staircase, float tmax, float bmin) nogil:
+    cdef int vi_id, vj_id, nnv, n_ids, i, j
+    cdef vector[vertex_id]* near_vertices
+    cdef weight_t value
+    cdef float d
+    n_ids = vertices_staircase.size()
 
-cdef vector[face_t] find_staircase_artifacts(Mesh mesh, double[3] stack_orientation, double T) nogil:
+    cdef vertex_t* vi
+    cdef vertex_t* vj
+    cdef size_t msize
+
+    msize = mesh.vertices.shape[0]
+    cdef vector[weight_t]* weights = new vector[weight_t](msize)
+    with gil:
+        print weights.size()
+
+    for i in xrange(n_ids):
+        vi_id = deref(vertices_staircase)[i]
+        vi = &mesh.vertices[vi_id][0]
+        near_vertices = mesh.get_near_vertices_to_v(vi_id, tmax)
+        nnv = near_vertices.size()
+
+        for j in xrange(nnv):
+            vj_id = deref(near_vertices)[j]
+            vj = &mesh.vertices[vj_id][0]
+
+            d = sqrt((vi[0] - vj[0]) * (vi[0] - vj[0])\
+                    + (vi[1] - vj[1]) * (vi[1] - vj[1])\
+                    + (vi[2] - vj[2]) * (vi[2] - vj[2]))
+            value = (1.0 - d/tmax) * (1 - bmin) + bmin
+
+            if value > deref(weights)[vj_id]:
+                deref(weights)[vj_id] = value
+
+        del near_vertices
+
+    return weights
+
+
+
+cdef vector[vertex_id]* find_staircase_artifacts(Mesh mesh, double[3] stack_orientation, double T) nogil:
     cdef int nv, nf, f_id, v_id
     cdef double of_z, of_y, of_x, min_z, max_z, min_y, max_y, min_x, max_x;
-    cdef vector[face_t]* f_ids
+    cdef vector[vertex_id]* f_ids
     cdef normal_t* normal
 
-    cdef vector[face_t] output
+    cdef vector[vertex_id]* output = new vector[vertex_id]()
     cdef int i
 
     nv = mesh.vertices.shape[0]
@@ -157,4 +198,7 @@ cdef vector[face_t] find_staircase_artifacts(Mesh mesh, double[3] stack_orientat
 
 def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef double[3] stack_orientation = [0.0, 0.0, 1.0]
-    print find_staircase_artifacts(mesh, stack_orientation, T)
+    cdef vector[vertex_id]* vertices_staircase =  find_staircase_artifacts(mesh, stack_orientation, T)
+
+    cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
+    print deref(weights)
