@@ -1,3 +1,9 @@
+#cython: boundscheck=False
+#cython: wraparound=False
+#cython: initializedcheck=False
+#cython: cdivision=True
+#cython: nonecheck=False
+
 import sys
 cimport numpy as np
 
@@ -76,10 +82,13 @@ cdef class Mesh:
             other.vertices[:] = self.vertices
             other.faces[:] = self.faces
             other.normals[:] = self.normals
+            other.map_vface = unordered_map[int, vector[vertex_id_t]](self.map_vface)
         else:
             other.vertices = self.vertices.copy()
             other.faces = self.faces.copy()
             other.normals = self.normals.copy()
+
+            other.map_vface = self.map_vface
 
     cdef vector[vertex_id_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
@@ -281,22 +290,18 @@ cdef Mesh taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, 
         for i in prange(D.size(), nogil=True):
             D[i] = calc_d(new_mesh, i)
 
-        for i in xrange(D.size()):
-            vi = &mesh.vertices[i][0]
-
-            vi[0] = vi[0] + deref(weights)[i]*l*D[i].x;
-            vi[1] = vi[1] + deref(weights)[i]*l*D[i].y;
-            vi[2] = vi[2] + deref(weights)[i]*l*D[i].z;
+        for i in prange(D.size(), nogil=True):
+            mesh.vertices[i][0] += deref(weights)[i]*l*D[i].x;
+            mesh.vertices[i][1] += deref(weights)[i]*l*D[i].y;
+            mesh.vertices[i][2] += deref(weights)[i]*l*D[i].z;
 
         for i in prange(D.size(), nogil=True):
             D[i] = calc_d(new_mesh, i)
 
-        for i in xrange(D.size()):
-            vi = &mesh.vertices[i][0]
-
-            vi[0] = vi[0] + deref(weights)[i]*l*D[i].x;
-            vi[1] = vi[1] + deref(weights)[i]*l*D[i].y;
-            vi[2] = vi[2] + deref(weights)[i]*l*D[i].z;
+        for i in prange(D.size(), nogil=True):
+            mesh.vertices[i][0] += deref(weights)[i]*m*D[i].x;
+            mesh.vertices[i][1] += deref(weights)[i]*m*D[i].y;
+            mesh.vertices[i][2] += deref(weights)[i]*m*D[i].z;
 
     return new_mesh
 
@@ -307,4 +312,4 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
     print deref(weights)
 
-    print taubin_smooth(mesh, weights, 0.5, -0.53, n_iters).vertices
+    return taubin_smooth(mesh, weights, 0.5, -0.53, n_iters).vertices
