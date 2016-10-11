@@ -90,6 +90,24 @@ cdef class Mesh:
 
             other.map_vface = self.map_vface
 
+    def to_vtk(self):
+        vertices = np.asarray(self.vertices)
+        faces = np.asarray(self.faces)
+        normals = np.asarray(self.normals)
+
+        points = vtk.vtkPoints()
+        points.SetData(numpy_support.numpy_to_vtk(vertices))
+
+        id_triangles = numpy_support.numpy_to_vtkIdTypeArray(faces)
+        triangles = vtk.vtkCellArray()
+        triangles.SetCells(faces.shape[0], id_triangles)
+
+        pd = vtk.vtkPolyData()
+        pd.SetPoints(points)
+        pd.SetPolys(triangles)
+
+        return pd
+
     cdef vector[vertex_id_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
 
@@ -312,4 +330,4 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
     print deref(weights)
 
-    return taubin_smooth(mesh, weights, 0.5, -0.53, n_iters).vertices
+    return taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
