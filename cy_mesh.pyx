@@ -5,6 +5,7 @@
 #cython: nonecheck=False
 
 import sys
+import time
 cimport numpy as np
 
 from libc.math cimport sin, cos, acos, exp, sqrt, fabs, M_PI
@@ -179,7 +180,7 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
     weights.assign(msize, bmin)
 
 
-    for i in xrange(n_ids):
+    for i in prange(n_ids, nogil=True):
         vi_id = deref(vertices_staircase)[i]
         vi = &mesh.vertices[vi_id, 0]
         near_vertices = mesh.get_near_vertices_to_v(vi_id, tmax)
@@ -192,7 +193,7 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
             d = sqrt((vi[0] - vj[0]) * (vi[0] - vj[0])\
                     + (vi[1] - vj[1]) * (vi[1] - vj[1])\
                     + (vi[2] - vj[2]) * (vi[2] - vj[2]))
-            value = (1.0 - d/tmax) * (1 - bmin) + bmin
+            value = (1.0 - d/tmax) * (1.0 - bmin) + bmin
 
             if value > deref(weights)[vj_id]:
                 deref(weights)[vj_id] = value
@@ -234,9 +235,9 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
         vj_id = deref(it)
         vj = &mesh.vertices[vj_id, 0]
 
-        D.x = D.x + (vj[0] - vi[0])
-        D.y = D.y + (vj[1] - vi[1])
-        D.z = D.z + (vj[2] - vi[2])
+        D.x = D.x + (vi[0] - vj[0])
+        D.y = D.y + (vi[1] - vj[1])
+        D.z = D.z + (vi[2] - vj[2])
         n += 1.0
 
         inc(it)
@@ -326,13 +327,19 @@ cdef Mesh taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, 
 
 def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef double[3] stack_orientation = [0.0, 0.0, 1.0]
-    cdef vector[vertex_id_t]* vertices_staircase =  find_staircase_artifacts(mesh, stack_orientation, T)
 
+    t0 = time.time()
+    cdef vector[vertex_id_t]* vertices_staircase =  find_staircase_artifacts(mesh, stack_orientation, T)
+    print "vertices staircase", time.time() - t0
+
+    t0 = time.time()
     cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
+    print "Weights", time.time() - t0
+
     del vertices_staircase
 
+    t0 = time.time()
     cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
-    del weights
+    print "taubin", time.time() - t0
 
-    return new_mesh
-
+    return new_mesh, np.asarray(deref(weights)).copy()
