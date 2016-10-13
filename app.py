@@ -25,6 +25,7 @@ def view(pd):
 
 def main():
     fname = sys.argv[1]
+    foutput = sys.argv[2]
 
     r = vtk.vtkPLYReader()
     r.SetFileName(fname)
@@ -50,7 +51,14 @@ def main():
     new_mesh = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
     new_pd = new_mesh.to_vtk()
 
-    view(new_pd)
+    print r.GetOutput().GetNumberOfPoints(), pd.GetNumberOfPoints(), new_pd.GetNumberOfPoints()
+
+    #  view(new_pd)
+
+    w = vtk.vtkPLYWriter()
+    w.SetInputData(new_pd)
+    w.SetFileName(foutput)
+    w.Write()
 
 if __name__ == "__main__":
     main()

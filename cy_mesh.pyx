@@ -126,7 +126,7 @@ cdef class Mesh:
         cdef int nf, nid, j
         cdef vertex_id_t f_id, vj
 
-        vip = &self.vertices[v_id][0]
+        vip = &self.vertices[v_id, 0]
         to_visit.push_back(v_id)
         while(not to_visit.empty()):
             v_id = to_visit.front()
@@ -143,10 +143,10 @@ cdef class Mesh:
                     status_f[f_id] = True
 
                     for j in xrange(3):
-                        vj = self.faces[f_id][j+1]
+                        vj = self.faces[f_id, j+1]
                         if status_v.find(vj) == status_v.end():
                             status_v[vj] = True
-                            vjp = &self.vertices[vj][0]
+                            vjp = &self.vertices[vj, 0]
                             distance = sqrt((vip[0] - vjp[0]) * (vip[0] - vjp[0]) \
                                             + (vip[1] - vjp[1]) * (vip[1] - vjp[1]) \
                                             + (vip[2] - vjp[2]) * (vip[2] - vjp[2]))
@@ -181,13 +181,13 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
 
     for i in xrange(n_ids):
         vi_id = deref(vertices_staircase)[i]
-        vi = &mesh.vertices[vi_id][0]
+        vi = &mesh.vertices[vi_id, 0]
         near_vertices = mesh.get_near_vertices_to_v(vi_id, tmax)
         nnv = near_vertices.size()
 
         for j in xrange(nnv):
             vj_id = deref(near_vertices)[j]
-            vj = &mesh.vertices[vj_id][0]
+            vj = &mesh.vertices[vj_id, 0]
 
             d = sqrt((vi[0] - vj[0]) * (vi[0] - vj[0])\
                     + (vi[1] - vj[1]) * (vi[1] - vj[1])\
@@ -218,7 +218,7 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
     for nid in xrange(nf):
         f_id = deref(idfaces)[nid]
         for i in xrange(3):
-            vj_id = mesh.faces[f_id][i+1]
+            vj_id = mesh.faces[f_id, i+1]
             if (vj_id != v_id):
                 vertices.insert(vj_id)
     #  del idfaces
@@ -227,15 +227,16 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
     D.y = 0.0
     D.z = 0.0
 
-    vi = &mesh.vertices[v_id][0]
+    vi = &mesh.vertices[v_id, 0]
 
     it = vertices.begin()
     while it != vertices.end():
-        vj = &mesh.vertices[deref(it)][0]
+        vj_id = deref(it)
+        vj = &mesh.vertices[vj_id, 0]
 
-        D.x = D.x + (vi[0] - vj[0])
-        D.y = D.y + (vi[1] - vj[1])
-        D.z = D.z + (vi[2] - vj[2])
+        D.x = D.x + (vj[0] - vi[0])
+        D.y = D.y + (vj[1] - vi[1])
+        D.z = D.z + (vj[2] - vi[2])
         n += 1.0
 
         inc(it)
@@ -269,7 +270,7 @@ cdef vector[vertex_id_t]* find_staircase_artifacts(Mesh mesh, double[3] stack_or
 
         for i in xrange(nf):
             f_id = deref(f_ids)[i]
-            normal = &mesh.normals[f_id][0]
+            normal = &mesh.normals[f_id, 0]
 
             of_z = 1 - fabs(normal[0]*stack_orientation[0] + normal[1]*stack_orientation[1] + normal[2]*stack_orientation[2]);
             of_y = 1 - fabs(normal[0]*0 + normal[1]*1 + normal[2]*0);
@@ -309,17 +310,17 @@ cdef Mesh taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, 
             D[i] = calc_d(new_mesh, i)
 
         for i in prange(D.size(), nogil=True):
-            mesh.vertices[i][0] += deref(weights)[i]*l*D[i].x;
-            mesh.vertices[i][1] += deref(weights)[i]*l*D[i].y;
-            mesh.vertices[i][2] += deref(weights)[i]*l*D[i].z;
+            new_mesh.vertices[i, 0] += deref(weights)[i]*l*D[i].x;
+            new_mesh.vertices[i, 1] += deref(weights)[i]*l*D[i].y;
+            new_mesh.vertices[i, 2] += deref(weights)[i]*l*D[i].z;
 
         for i in prange(D.size(), nogil=True):
             D[i] = calc_d(new_mesh, i)
 
         for i in prange(D.size(), nogil=True):
-            mesh.vertices[i][0] += deref(weights)[i]*m*D[i].x;
-            mesh.vertices[i][1] += deref(weights)[i]*m*D[i].y;
-            mesh.vertices[i][2] += deref(weights)[i]*m*D[i].z;
+            new_mesh.vertices[i, 0] += deref(weights)[i]*m*D[i].x;
+            new_mesh.vertices[i, 1] += deref(weights)[i]*m*D[i].y;
+            new_mesh.vertices[i, 2] += deref(weights)[i]*m*D[i].z;
 
     return new_mesh
 
@@ -328,6 +329,10 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef vector[vertex_id_t]* vertices_staircase =  find_staircase_artifacts(mesh, stack_orientation, T)
 
     cdef vector[weight_t]* weights = calc_artifacts_weight(mesh, vertices_staircase, tmax, bmin)
-    print deref(weights)
+    del vertices_staircase
 
-    return taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
+    cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
+    del weights
+
+    return new_mesh
+
