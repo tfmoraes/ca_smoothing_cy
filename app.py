@@ -50,7 +50,7 @@ def main():
     mesh = cy_mesh.Mesh(pd)
 
     print mesh.get_near_vertices(2, 1.5)
-    new_mesh, weights = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.7, 10)
+    new_mesh, weights = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.5, 20)
     new_pd = new_mesh.to_vtk()
 
     new_pd.GetPointData().SetScalars(numpy_support.numpy_to_vtk(weights))
@@ -59,11 +59,12 @@ def main():
 
     print weights.shape
 
-    #  view(new_pd)
+    view(new_pd)
 
-    w = vtk.vtkXMLPolyDataWriter()
+    w = vtk.vtkPolyDataWriter()
     w.SetInputData(new_pd)
     w.SetFileName(foutput)
+    w.Update()
     w.Write()
 
 if __name__ == "__main__":

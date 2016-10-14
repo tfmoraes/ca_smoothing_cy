@@ -182,6 +182,8 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
 
     for i in prange(n_ids, nogil=True):
         vi_id = deref(vertices_staircase)[i]
+        deref(weights)[vi_id] = 1.0
+
         vi = &mesh.vertices[vi_id, 0]
         near_vertices = mesh.get_near_vertices_to_v(vi_id, tmax)
         nnv = near_vertices.size()
@@ -342,4 +344,4 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
     print "taubin", time.time() - t0
 
-    return new_mesh, np.asarray(deref(weights)).copy()
+    return new_mesh, np.asarray(deref(weights))
