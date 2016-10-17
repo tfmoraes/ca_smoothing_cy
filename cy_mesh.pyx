@@ -1,3 +1,4 @@
+# distutils: language = c++
 #cython: boundscheck=False
 #cython: wraparound=False
 #cython: initializedcheck=False
@@ -27,12 +28,11 @@ from vtk.util import numpy_support
 
 ctypedef float weight_t
 
-cdef struct s_point:
+cdef struct Point:
     vertex_t x
     vertex_t y
     vertex_t z
 
-ctypedef s_point Point
 
 cdef class Mesh:
     cdef vertex_t[:, :] vertices
