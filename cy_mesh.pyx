@@ -12,9 +12,11 @@ cimport numpy as np
 from libc.math cimport sin, cos, acos, exp, sqrt, fabs, M_PI
 from libc.stdlib cimport abs as cabs
 from cython.operator cimport dereference as deref, preincrement as inc
+from libcpp.map cimport map
 from libcpp.unordered_map cimport unordered_map
 from libcpp.set cimport set
 from libcpp.vector cimport vector
+from libcpp.pair cimport pair
 from libcpp cimport bool
 from libcpp.deque cimport deque as cdeque
 from cython.parallel import prange
@@ -33,18 +35,23 @@ cdef struct Point:
     vertex_t y
     vertex_t z
 
+ctypedef pair[vertex_id_t, vertex_id_t] key
+
 
 cdef class Mesh:
     cdef vertex_t[:, :] vertices
     cdef vertex_id_t[:, :] faces
     cdef normal_t[:, :] normals
 
-    cdef bool _initialized
-
     cdef unordered_map[int, vector[vertex_id_t]] map_vface
+    cdef unordered_map[vertex_id_t, int] border_vertices
+
+    cdef bool _initialized
 
     def __cinit__(self, pd=None, other=None):
         cdef int i
+        cdef map[key, int] edge_nfaces
+        cdef map[key, int].iterator it
         if pd:
             self._initialized = True
             _vertices = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
@@ -61,10 +68,25 @@ cdef class Mesh:
             self.normals = _normals
 
 
+
             for i in xrange(_faces.shape[0]):
                 self.map_vface[self.faces[i, 1]].push_back(i)
                 self.map_vface[self.faces[i, 2]].push_back(i)
                 self.map_vface[self.faces[i, 3]].push_back(i)
+
+                edge_nfaces[key(min(self.faces[i, 1], self.faces[i, 2]), max(self.faces[i, 1], self.faces[i, 2]))] += 1
+                edge_nfaces[key(min(self.faces[i, 2], self.faces[i, 3]), max(self.faces[i, 2], self.faces[i, 3]))] += 1
+                edge_nfaces[key(min(self.faces[i, 1], self.faces[i, 3]), max(self.faces[i, 1], self.faces[i, 3]))] += 1
+
+            it = edge_nfaces.begin()
+
+            while it != edge_nfaces.end():
+                if deref(it).second == 1:
+                    self.border_vertices[deref(it).first.first] = 1
+                    self.border_vertices[deref(it).first.second] = 1
+
+                inc(it)
+
 
         elif other:
             _other = <Mesh>other
@@ -73,7 +95,7 @@ cdef class Mesh:
             self.faces = _other.faces.copy()
             self.normals = _other.normals.copy()
             self.map_vface = unordered_map[int, vector[vertex_id_t]](_other.map_vface)
-
+            self.border_vertices = unordered_map[vertex_id_t, int](_other.border_vertices)
         else:
             self._initialized = False
 
@@ -84,12 +106,14 @@ cdef class Mesh:
             other.faces[:] = self.faces
             other.normals[:] = self.normals
             other.map_vface = unordered_map[int, vector[vertex_id_t]](self.map_vface)
+            other.border_vertices = unordered_map[vertex_id_t, int](self.border_vertices)
         else:
             other.vertices = self.vertices.copy()
             other.faces = self.faces.copy()
             other.normals = self.normals.copy()
 
             other.map_vface = self.map_vface
+            other.border_vertices = self.border_vertices
 
     def to_vtk(self):
         vertices = np.asarray(self.vertices)
@@ -111,6 +135,26 @@ cdef class Mesh:
 
     cdef vector[vertex_id_t]* get_faces_by_vertex(self, int v_id) nogil:
         return &self.map_vface[v_id]
+
+    cdef set[vertex_id_t]* get_ring0(self, vertex_id_t v_id) nogil:
+        cdef vertex_id_t f_id
+        cdef set[vertex_id_t]* ring0 = new set[vertex_id_t]()
+        cdef vector[vertex_id_t].iterator it = self.map_vface[v_id].begin()
+
+        while it != self.map_vface[v_id].end():
+            f_id = deref(it)
+            inc(it)
+            if self.faces[f_id, 1] != v_id:
+                ring0.insert(self.faces[f_id, 1])
+            if self.faces[f_id, 2] != v_id:
+                ring0.insert(self.faces[f_id, 2])
+            if self.faces[f_id, 3] != v_id:
+                ring0.insert(self.faces[f_id, 3])
+
+        return ring0
+
+    cdef bool is_border(self, vertex_id_t v_id) nogil:
+        return self.border_vertices.find(v_id) != self.border_vertices.end()
 
     cdef vector[vertex_id_t]* get_near_vertices_to_v(self, vertex_id_t v_id, float dmax) nogil:
         cdef vector[vertex_id_t]* idfaces
@@ -149,12 +193,11 @@ cdef class Mesh:
                             status_v[vj] = True
                             vjp = &self.vertices[vj, 0]
                             distance = sqrt((vip[0] - vjp[0]) * (vip[0] - vjp[0]) \
-                                            + (vip[1] - vjp[1]) * (vip[1] - vjp[1]) \
-                                            + (vip[2] - vjp[2]) * (vip[2] - vjp[2]))
+                                          + (vip[1] - vjp[1]) * (vip[1] - vjp[1]) \
+                                          + (vip[2] - vjp[2]) * (vip[2] - vjp[2]))
                             if distance <= dmax:
                                 near_vertices.push_back(vj)
                                 to_visit.push_back(vj)
-
 
         return near_vertices
 
@@ -179,7 +222,6 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
     cdef vector[weight_t]* weights = new vector[weight_t](msize)
     weights.assign(msize, bmin)
 
-
     for i in prange(n_ids, nogil=True):
         vi_id = deref(vertices_staircase)[i]
         deref(weights)[vi_id] = 1.0
@@ -193,14 +235,18 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
             vj = &mesh.vertices[vj_id, 0]
 
             d = sqrt((vi[0] - vj[0]) * (vi[0] - vj[0])\
-                    + (vi[1] - vj[1]) * (vi[1] - vj[1])\
-                    + (vi[2] - vj[2]) * (vi[2] - vj[2]))
+                   + (vi[1] - vj[1]) * (vi[1] - vj[1])\
+                   + (vi[2] - vj[2]) * (vi[2] - vj[2]))
             value = (1.0 - d/tmax) * (1.0 - bmin) + bmin
 
             if value > deref(weights)[vj_id]:
                 deref(weights)[vj_id] = value
 
         del near_vertices
+
+    for i in xrange(msize):
+        if mesh.is_border(i):
+            deref(weights)[i] = 0.0
 
     return weights
 
