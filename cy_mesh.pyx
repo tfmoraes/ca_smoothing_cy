@@ -67,8 +67,6 @@ cdef class Mesh:
             self.faces = _faces
             self.normals = _normals
 
-
-
             for i in xrange(_faces.shape[0]):
                 self.map_vface[self.faces[i, 1]].push_back(i)
                 self.map_vface[self.faces[i, 2]].push_back(i)
@@ -86,7 +84,6 @@ cdef class Mesh:
                     self.border_vertices[deref(it).first.second] = 1
 
                 inc(it)
-
 
         elif other:
             _other = <Mesh>other
@@ -390,4 +387,6 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
     print "taubin", time.time() - t0
 
-    return new_mesh, np.asarray(deref(weights))
+    del weights
+
+    return new_mesh

@@ -50,14 +50,8 @@ def main():
     mesh = cy_mesh.Mesh(pd)
 
     print mesh.get_near_vertices(2, 1.5)
-    new_mesh, weights = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
+    new_mesh = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
     new_pd = new_mesh.to_vtk()
-
-    new_pd.GetPointData().SetScalars(numpy_support.numpy_to_vtk(weights))
-
-    print r.GetOutput().GetNumberOfPoints(), pd.GetNumberOfPoints(), new_pd.GetNumberOfPoints()
-
-    print weights.shape
 
     view(new_pd)
 
