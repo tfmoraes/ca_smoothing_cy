@@ -142,25 +142,25 @@ cdef class Mesh:
         """
         return &self.map_vface[v_id]
 
-    cdef set[vertex_id_t]* get_ring0(self, vertex_id_t v_id) nogil:
+    cdef set[vertex_id_t]* get_ring1(self, vertex_id_t v_id) nogil:
         """
-        Returns the ring0 of vertex `v_id'
+        Returns the ring1 of vertex `v_id'
         """
         cdef vertex_id_t f_id
-        cdef set[vertex_id_t]* ring0 = new set[vertex_id_t]()
+        cdef set[vertex_id_t]* ring1 = new set[vertex_id_t]()
         cdef vector[vertex_id_t].iterator it = self.map_vface[v_id].begin()
 
         while it != self.map_vface[v_id].end():
             f_id = deref(it)
             inc(it)
             if self.faces[f_id, 1] != v_id:
-                ring0.insert(self.faces[f_id, 1])
+                ring1.insert(self.faces[f_id, 1])
             if self.faces[f_id, 2] != v_id:
-                ring0.insert(self.faces[f_id, 2])
+                ring1.insert(self.faces[f_id, 2])
             if self.faces[f_id, 3] != v_id:
-                ring0.insert(self.faces[f_id, 3])
+                ring1.insert(self.faces[f_id, 3])
 
-        return ring0
+        return ring1
 
     cdef bool is_border(self, vertex_id_t v_id) nogil:
         """
