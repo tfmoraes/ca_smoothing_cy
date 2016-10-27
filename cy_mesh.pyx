@@ -274,9 +274,21 @@ cdef vector[weight_t]* calc_artifacts_weight(Mesh mesh, vector[vertex_id_t]* ver
 
         del near_vertices
 
-    for i in xrange(msize):
-        if mesh.is_border(i):
-            deref(weights)[i] = 0.0
+    #  for i in xrange(msize):
+        #  if mesh.is_border(i):
+            #  deref(weights)[i] = 0.0
+
+    #  cdef vertex_id_t v0, v1, v2
+    #  for i in xrange(mesh.faces.shape[0]):
+        #  for j in xrange(1, 4):
+            #  v0 = mesh.faces[i, j]
+            #  vi = &mesh.vertices[v0, 0]
+            #  if mesh.is_border(v0):
+                #  deref(weights)[v0] = 0.0
+                #  v1 = mesh.faces[i, (j + 1) % 3 + 1]
+                #  if mesh.is_border(v1):
+                    #  vi = &mesh.vertices[v1, 0]
+                    #  deref(weights)[v0] = 0.0
 
     return weights
 
@@ -288,37 +300,52 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
     cdef int i
     cdef vertex_t* vi
     cdef vertex_t* vj
-    cdef set[vertex_id_t] vertices
+    cdef set[vertex_id_t]* vertices
     cdef set[vertex_id_t].iterator it
     cdef vertex_id_t vj_id
 
-    cdef vector[vertex_id_t]* idfaces = mesh.get_faces_by_vertex(v_id)
-    nf = idfaces.size()
-    for nid in xrange(nf):
-        f_id = deref(idfaces)[nid]
-        for i in xrange(3):
-            vj_id = mesh.faces[f_id, i+1]
-            if (vj_id != v_id):
-                vertices.insert(vj_id)
-    #  del idfaces
+    #  cdef vector[vertex_id_t]* idfaces = mesh.get_faces_by_vertex(v_id)
+    #  nf = idfaces.size()
+    #  for nid in xrange(nf):
+        #  f_id = deref(idfaces)[nid]
+        #  for i in xrange(3):
+            #  vj_id = mesh.faces[f_id, i+1]
+            #  if (vj_id != v_id):
+                #  vertices.insert(vj_id)
+    #  #  del idfaces
 
     D.x = 0.0
     D.y = 0.0
     D.z = 0.0
 
+    vertices = mesh.get_ring1(v_id)
     vi = &mesh.vertices[v_id, 0]
 
-    it = vertices.begin()
-    while it != vertices.end():
-        vj_id = deref(it)
-        vj = &mesh.vertices[vj_id, 0]
+    if mesh.is_border(v_id):
+        it = vertices.begin()
+        while it != vertices.end():
+            vj_id = deref(it)
+            if mesh.is_border(vj_id):
+                vj = &mesh.vertices[vj_id, 0]
 
-        D.x = D.x + (vi[0] - vj[0])
-        D.y = D.y + (vi[1] - vj[1])
-        D.z = D.z + (vi[2] - vj[2])
-        n += 1.0
+                D.x = D.x + (vi[0] - vj[0])
+                D.y = D.y + (vi[1] - vj[1])
+                D.z = D.z + (vi[2] - vj[2])
+                n += 1.0
 
-        inc(it)
+            inc(it)
+    else:
+        it = vertices.begin()
+        while it != vertices.end():
+            vj_id = deref(it)
+            vj = &mesh.vertices[vj_id, 0]
+
+            D.x = D.x + (vi[0] - vj[0])
+            D.y = D.y + (vi[1] - vj[1])
+            D.z = D.z + (vi[2] - vj[2])
+            n += 1.0
+
+            inc(it)
 
     D.x = D.x / n
     D.y = D.y / n
