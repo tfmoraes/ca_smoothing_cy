@@ -96,7 +96,6 @@ cdef class Mesh:
         else:
             self._initialized = False
 
-
     cdef void copy_to(self, Mesh other):
         """
         Copies self content to other.
@@ -304,16 +303,6 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
     cdef set[vertex_id_t].iterator it
     cdef vertex_id_t vj_id
 
-    #  cdef vector[vertex_id_t]* idfaces = mesh.get_faces_by_vertex(v_id)
-    #  nf = idfaces.size()
-    #  for nid in xrange(nf):
-        #  f_id = deref(idfaces)[nid]
-        #  for i in xrange(3):
-            #  vj_id = mesh.faces[f_id, i+1]
-            #  if (vj_id != v_id):
-                #  vertices.insert(vj_id)
-    #  #  del idfaces
-
     D.x = 0.0
     D.y = 0.0
     D.z = 0.0
@@ -346,6 +335,8 @@ cdef Point calc_d(Mesh mesh, vertex_id_t v_id) nogil:
             n += 1.0
 
             inc(it)
+
+    del vertices
 
     D.x = D.x / n
     D.y = D.y / n
@@ -418,34 +409,34 @@ cdef vector[vertex_id_t]* find_staircase_artifacts(Mesh mesh, double[3] stack_or
     return output
 
 
-cdef Mesh taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, int steps):
+cdef void taubin_smooth(Mesh mesh, vector[weight_t]* weights, float l, float m, int steps):
     """
     Implementation of Taubin's smooth algorithm described in the paper "A
     Signal Processing Approach To Fair Surface Design". His benefeat is it
     avoids surface shrinking.
     """
-    cdef Mesh new_mesh = Mesh(other=mesh)
+    #  cdef Mesh new_mesh = Mesh(other=mesh)
     cdef vector[Point] D = vector[Point](mesh.vertices.shape[0])
     cdef vertex_t* vi
     cdef int s, i
     for s in xrange(steps):
         for i in prange(D.size(), nogil=True):
-            D[i] = calc_d(new_mesh, i)
+            D[i] = calc_d(mesh, i)
 
         for i in prange(D.size(), nogil=True):
-            new_mesh.vertices[i, 0] += deref(weights)[i]*l*D[i].x;
-            new_mesh.vertices[i, 1] += deref(weights)[i]*l*D[i].y;
-            new_mesh.vertices[i, 2] += deref(weights)[i]*l*D[i].z;
+            mesh.vertices[i, 0] += deref(weights)[i]*l*D[i].x;
+            mesh.vertices[i, 1] += deref(weights)[i]*l*D[i].y;
+            mesh.vertices[i, 2] += deref(weights)[i]*l*D[i].z;
 
         for i in prange(D.size(), nogil=True):
-            D[i] = calc_d(new_mesh, i)
+            D[i] = calc_d(mesh, i)
 
         for i in prange(D.size(), nogil=True):
-            new_mesh.vertices[i, 0] += deref(weights)[i]*m*D[i].x;
-            new_mesh.vertices[i, 1] += deref(weights)[i]*m*D[i].y;
-            new_mesh.vertices[i, 2] += deref(weights)[i]*m*D[i].z;
+            mesh.vertices[i, 0] += deref(weights)[i]*m*D[i].x;
+            mesh.vertices[i, 1] += deref(weights)[i]*m*D[i].y;
+            mesh.vertices[i, 2] += deref(weights)[i]*m*D[i].z;
 
-    return new_mesh
+    #  return mesh
 
 def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     """
@@ -475,9 +466,9 @@ def ca_smoothing(Mesh mesh, double T, double tmax, double bmin, int n_iters):
     del vertices_staircase
 
     t0 = time.time()
-    cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
+    #  cdef Mesh new_mesh = taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
+    taubin_smooth(mesh, weights, 0.5, -0.53, n_iters)
     print "taubin", time.time() - t0
 
     del weights
-
-    return new_mesh
+    #  return new_mesh

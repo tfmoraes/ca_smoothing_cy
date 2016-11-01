@@ -50,8 +50,9 @@ def main():
     mesh = cy_mesh.Mesh(pd)
 
     print mesh.get_near_vertices(2, 1.5)
-    new_mesh = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
-    new_pd = new_mesh.to_vtk()
+    #  new_mesh = cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
+    cy_mesh.ca_smoothing(mesh, 0.7, 3, 0.2, 10)
+    new_pd = mesh.to_vtk()
 
     view(new_pd)
 
